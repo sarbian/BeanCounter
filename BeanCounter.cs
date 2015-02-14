@@ -388,7 +388,7 @@ namespace BeanCounter
 
             // For now consider anything created since the first capture as a leak. 
             // I m sure there are ways to clean that up but I m less sure about the time investment required to refine this.
-            IEnumerable<int> leakIDs = collections[leakEnd].instanceIDs.Keys.Except(collections[leakEnd].instanceIDs.Keys);
+            IEnumerable<int> leakIDs = collections[leakEnd].instanceIDs.Keys.Except(collections[leakOrigin].instanceIDs.Keys);
 
             var lastInstances = collections[leakEnd].instanceIDs;
 
