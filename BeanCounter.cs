@@ -433,7 +433,7 @@ namespace BeanCounter
                         }
                     }
 
-                    sb.AppendFormat("\n");
+                    sb.AppendFormat(" - id {0} \n", o.GetInstanceID());
                 }
             }
             print(sb.ToString());
