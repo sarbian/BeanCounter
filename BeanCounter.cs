@@ -40,16 +40,18 @@ namespace BeanCounter
         public bool showUI = false;
 
         // All the state we captured
-        private List<BeanCount> collections;
+        private static List<BeanCount> collections;
         // All the type counted sorted in a easier to access object to avoid sorting each frame
         // Redundant with collections but allow for an easier to read code
         private List<TypeCount> sortedTypeCounts;
         // Reference to potential leaks
         private List<WeakReference> leaks;
 
-        private int lastObjectCount = 5000;
-        private int lastTypeCount = 40;
+        private static int lastObjectCount = 5000;
+        private static int lastTypeCount = 40;
         private int displayedCount = 30;
+
+        private bool displayChangingOnly = false;
 
         private int survivorsCount = 0;
         
@@ -57,7 +59,9 @@ namespace BeanCounter
         private static int leakEnd = 0;
 
         private bool collectNextFrame = false;
-        private bool sortNextFrame = false;
+        private static bool sortNextFrame = false;
+        private static bool triggerActiveCollect = false;
+        private static bool activeCollect = false;
         private bool searchForSurvivorsNextFrame = false;
         private static GUIStyle _typeStyle;
         private static GUIStyle _valueStyle;
@@ -69,6 +73,7 @@ namespace BeanCounter
         {
             public float time;
             public GameScenes scene;
+            public string name;
             public Dictionary<Type, int> count;
             // with access to source and Unity Pro profilter one could use Profiler.GetRuntimeMemorySize(obj)
             //public Dictionary<Type, int> mem; 
@@ -113,7 +118,6 @@ namespace BeanCounter
             {
                 collectNextFrame = false;
                 Collect();
-                sortNextFrame = true;
             }
 
             if (sortNextFrame)
@@ -126,6 +130,15 @@ namespace BeanCounter
             {
                 searchForSurvivorsNextFrame = false;
                 SearchForSurvivors();
+            }
+
+            if (activeCollect)
+                activeCollect = false;
+
+            if (triggerActiveCollect)
+            {
+                triggerActiveCollect = false;
+                activeCollect = true;
             }
         }
 
@@ -163,7 +176,7 @@ namespace BeanCounter
                     8785479,
                     windowPos,
                     WindowGUI,
-                    "GCMonitor",
+                    "BeanCounter",
                     GUILayout.ExpandWidth(true),
                     GUILayout.ExpandHeight(true));
             }
@@ -209,6 +222,11 @@ namespace BeanCounter
                 displayedCount++;
             }
 
+            if (GUILayout.Button("Active", GUILayout.ExpandWidth(false)))
+            {
+                triggerActiveCollect = true;
+            }
+
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
 
@@ -216,27 +234,38 @@ namespace BeanCounter
             GUILayout.Label("Types " + (collections.Count > 0 ? lastTypeCount : 0).ToString(), GUILayout.ExpandWidth(false));
             GUILayout.Label("Potential leak " + survivorsCount, GUILayout.ExpandWidth(false));
 
-            GUILayout.EndHorizontal();
+            bool oldDisplayChangingOnly = displayChangingOnly;
 
+            displayChangingOnly = GUILayout.Toggle(displayChangingOnly, "Display only delta", GUILayout.ExpandWidth(false));
+
+            if (oldDisplayChangingOnly != displayChangingOnly)
+            {
+                sortNextFrame = true;
+                windowPos.height = _height;
+            }
+
+            GUILayout.EndHorizontal();
+            
             // The result table
             GUILayout.BeginHorizontal(GUILayout.ExpandWidth(false));
 
             GUILayout.BeginVertical();
             GUILayout.Label("Origin", _typeStyle);
             GUILayout.Label("End", _typeStyle);
-            DrawColumn("", "Types", _typeStyle, sortedTypeCounts.Select(tc => tc.type.ToString()), displayedCount);
+            DrawColumn("", "", "Types", _typeStyle, sortedTypeCounts.Select(tc => tc.type.ToString()), displayedCount);
             GUILayout.EndVertical();
 
             int columns = collections.Count;
 
-            leakOrigin = Math.Min(Math.Min(leakOrigin, leakEnd), columns);
-            leakEnd = Math.Min(Math.Max(leakOrigin, leakEnd), columns);
+            int oldLeakOrigin = leakOrigin = Math.Min(Math.Min(leakOrigin, leakEnd), columns);
+            int oldLeakEnd = leakEnd = Math.Min(Math.Max(leakOrigin, leakEnd), columns);
 
             for (int column = 0; column < columns; column++)
             {
                 TimeSpan t = TimeSpan.FromSeconds(collections[column].time - collections[0].time);
-                string elapsed = string.Format("{0:D2}:{1:D2}:{2:D2}", t.Hours, t.Minutes, t.Seconds);
+                string elapsed = string.Format("{0:D2}:{1:D2}:{2:D2}", t.Hours.ToString(), t.Minutes.ToString(), t.Seconds.ToString());
                 string scene = collections[column].scene.ToString().Substring(0, 5);
+                string name = collections[column].name ?? "";
                 var dataStyles = sortedTypeCounts.Select(tc => column > 0 && tc.counts[column] > tc.counts[column - 1] ? _valueStyleRed : _valueStyle);
                 GUILayout.BeginVertical();
 
@@ -248,16 +277,19 @@ namespace BeanCounter
                 if (changedEnd)
                     leakEnd = column;
 
-                DrawColumn(elapsed, scene, _valueStyle, sortedTypeCounts.Select(tc => tc.counts[column].ToString()), displayedCount, dataStyles);
+                DrawColumn(elapsed, scene, name, _valueStyle, sortedTypeCounts.Select(tc => tc.counts[column].ToString()), displayedCount, dataStyles);
                 GUILayout.EndVertical();
             }
 
+            if (leakEnd != oldLeakEnd || leakOrigin != oldLeakOrigin)
+                sortNextFrame = true;
+
             var deltaCounts = sortedTypeCounts.Select(tc => (tc.last - tc.first));
-            var deltatyles = deltaCounts.Select(tc => tc > 0 ? _valueStyleRed : _valueStyle);
+            var deltaStyles = deltaCounts.Select(tc => tc > 0 ? _valueStyleRed : _valueStyle);
             GUILayout.BeginVertical();
             GUILayout.Label("", _valueStyle);
             GUILayout.Label("", _valueStyle);
-            DrawColumn("", "Delta", _valueStyle, deltaCounts.Select(tc => tc.ToString()), displayedCount, deltatyles);
+            DrawColumn("", "", "Delta", _valueStyle, deltaCounts.Select(tc => tc.ToString()), displayedCount, deltaStyles);
             GUILayout.EndVertical();
 
             GUILayout.EndHorizontal();
@@ -267,17 +299,18 @@ namespace BeanCounter
             GUI.DragWindow();
         }
 
-        private void DrawColumn(string header, string header2, GUIStyle s, IEnumerable<string> data, int lineLimit)
+        private void DrawColumn(string header, string header2, string header3, GUIStyle s, IEnumerable<string> data, int lineLimit)
         {
             var dataStyles = Enumerable.Repeat(s, lineLimit);
-            DrawColumn(header, header2, s, data, lineLimit, dataStyles);
+            DrawColumn(header, header2, header3, s, data, lineLimit, dataStyles);
         }
 
-        private void DrawColumn(string header, string header2, GUIStyle s, IEnumerable<string> data, int lineLimit, IEnumerable<GUIStyle> dataStyles)
+        private void DrawColumn(string header, string header2, string header3, GUIStyle s, IEnumerable<string> data, int lineLimit, IEnumerable<GUIStyle> dataStyles)
         {
             var dse = dataStyles.GetEnumerator();
             GUILayout.Label(header, s);
             GUILayout.Label(header2, s);
+            GUILayout.Label(header3, s);
             int line = 0;
             foreach (string datum in data)
             {
@@ -300,13 +333,19 @@ namespace BeanCounter
             windowPos.width= _width;
         }
 
-        private void Collect()
+        public static void CollectifActive(string name)
         {
-            print("Collect");
+            if (activeCollect)
+                Collect(name);
+        }
+
+        public static void Collect(string name = null)
+        {
             BeanCount col = new BeanCount();
 
             col.time = Time.realtimeSinceStartup;
             col.scene = HighLogic.LoadedScene;
+            col.name = name;
             col.count = new Dictionary<Type, int>(lastTypeCount);
             col.instanceIDs = new Dictionary<int, WeakReference>(lastObjectCount);
 
@@ -333,6 +372,8 @@ namespace BeanCounter
             leakEnd = collections.Count;
 
             collections.Add(col);
+            
+            sortNextFrame = true;
         }
 
         private void Sort()
@@ -345,6 +386,8 @@ namespace BeanCounter
             var sortedCounts = from pair in collections.Last().count
                 orderby pair.Value descending
                 select pair.Key;
+
+            //var displayed = new List<TypeCount>(sortedTypeCounts.Where(tc => tc.last != tc.first));
 
             sortedTypeCounts.Clear();
             foreach (Type t in sortedCounts)
@@ -362,7 +405,9 @@ namespace BeanCounter
                         count.counts[i] = c;
                     }
                 }
-                sortedTypeCounts.Add(count);
+
+                if (!displayChangingOnly || count.first != count.last)
+                    sortedTypeCounts.Add(count);
             }
         }
 
@@ -388,6 +433,9 @@ namespace BeanCounter
 
             // For now consider anything created since the first capture as a leak. 
             // I m sure there are ways to clean that up but I m less sure about the time investment required to refine this.
+            
+            // If we have a scene change the result is moe or less useless since the id for most ressource changed.
+            // I should add an other mode that look for item whose id are present in all collections.
             IEnumerable<int> leakIDs = collections[leakEnd].instanceIDs.Keys.Except(collections[leakOrigin].instanceIDs.Keys);
 
             var lastInstances = collections[leakEnd].instanceIDs;
@@ -407,7 +455,7 @@ namespace BeanCounter
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.AppendFormat("found {0} potential leaks\n", leaks.Count);
+            sb.AppendFormat("found {0} potential leaks\n", leaks.Count.ToString());
 
             foreach (var obj in leaks)
             {
@@ -432,8 +480,13 @@ namespace BeanCounter
                             sb.AppendFormat(" - Component parent name {0}", c.transform.parent.name);
                         }
                     }
+                    else if (o is Texture2D)
+                    {
+                        Texture2D t = (Texture2D)o;
+                        sb.AppendFormat(" - Texture2D {0} {1}x{2} {3} {4}", t.name, t.width.ToString(), t.height.ToString(), t.format.ToString(), t.GetPixels32().Sum(color32 => color32.a + color32.r + color32.b + color32.g).ToString());
+                    }
 
-                    sb.AppendFormat(" - id {0} \n", o.GetInstanceID());
+                    sb.AppendFormat(" - id {0} \n", o.GetInstanceID().ToString());
                 }
             }
             print(sb.ToString());
