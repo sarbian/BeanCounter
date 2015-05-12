@@ -485,6 +485,11 @@ namespace BeanCounter
                         Texture2D t = (Texture2D)o;
                         sb.AppendFormat(" - Texture2D {0} {1}x{2} {3} {4}", t.name, t.width.ToString(), t.height.ToString(), t.format.ToString(), t.GetPixels32().Sum(color32 => color32.a + color32.r + color32.b + color32.g).ToString());
                     }
+                    else if (o is Material)
+                    {
+                        Material m = (Material)o;
+                        sb.AppendFormat(" - Material {0} Shader Name {1} Texture Name {2}", m.name, m.shader.name, m.mainTexture.name);
+                    }
 
                     sb.AppendFormat(" - id {0} \n", o.GetInstanceID().ToString());
                 }
