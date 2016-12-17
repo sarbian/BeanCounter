@@ -109,7 +109,7 @@ namespace BeanCounter
         
         public void Update()
         {
-            if (GameSettings.MODIFIER_KEY.GetKey() && Input.GetKeyDown(KeyCode.F3))
+            if ((GameSettings.MODIFIER_KEY.GetKey() || Input.GetKey(KeyCode.RightShift))  && Input.GetKeyDown(KeyCode.F3))
             {
                 showUI = !showUI;
             }
@@ -252,7 +252,7 @@ namespace BeanCounter
             GUILayout.BeginVertical();
             GUILayout.Label("Origin", _typeStyle);
             GUILayout.Label("End", _typeStyle);
-            DrawColumn("", "", "Types", _typeStyle, sortedTypeCounts.Select(tc => tc.type.ToString()), displayedCount);
+            DrawColumn(new[] { "", "", "PQSAssined", "PQSUnassigned", "Types"}, _typeStyle, sortedTypeCounts.Select(tc => tc.type.ToString()), displayedCount);
             GUILayout.EndVertical();
 
             int columns = collections.Count;
@@ -277,7 +277,7 @@ namespace BeanCounter
                 if (changedEnd)
                     leakEnd = column;
 
-                DrawColumn(elapsed, scene, name, _valueStyle, sortedTypeCounts.Select(tc => tc.counts[column].ToString()), displayedCount, dataStyles);
+                DrawColumn(new[]{elapsed, scene, name }, _valueStyle, sortedTypeCounts.Select(tc => tc.counts[column].ToString()), displayedCount, dataStyles);
                 GUILayout.EndVertical();
             }
 
@@ -289,7 +289,7 @@ namespace BeanCounter
             GUILayout.BeginVertical();
             GUILayout.Label("", _valueStyle);
             GUILayout.Label("", _valueStyle);
-            DrawColumn("", "", "Delta", _valueStyle, deltaCounts.Select(tc => tc.ToString()), displayedCount, deltaStyles);
+            DrawColumn(new []{ "", "", "", "", "Delta"}, _valueStyle, deltaCounts.Select(tc => tc.ToString()), displayedCount, deltaStyles);
             GUILayout.EndVertical();
 
             GUILayout.EndHorizontal();
@@ -299,18 +299,19 @@ namespace BeanCounter
             GUI.DragWindow();
         }
 
-        private void DrawColumn(string header, string header2, string header3, GUIStyle s, IEnumerable<string> data, int lineLimit)
+        private void DrawColumn(string[] headers, GUIStyle s, IEnumerable<string> data, int lineLimit)
         {
             var dataStyles = Enumerable.Repeat(s, lineLimit);
-            DrawColumn(header, header2, header3, s, data, lineLimit, dataStyles);
+            DrawColumn(headers, s, data, lineLimit, dataStyles);
         }
 
-        private void DrawColumn(string header, string header2, string header3, GUIStyle s, IEnumerable<string> data, int lineLimit, IEnumerable<GUIStyle> dataStyles)
+        private void DrawColumn(string[] headers, GUIStyle s, IEnumerable<string> data, int lineLimit, IEnumerable<GUIStyle> dataStyles)
         {
             var dse = dataStyles.GetEnumerator();
-            GUILayout.Label(header, s);
-            GUILayout.Label(header2, s);
-            GUILayout.Label(header3, s);
+            for (int i = 0; i < headers.Length; i++)
+            {
+                GUILayout.Label(headers[i], s);
+            }
             int line = 0;
             foreach (string datum in data)
             {
@@ -434,7 +435,7 @@ namespace BeanCounter
             // For now consider anything created since the first capture as a leak. 
             // I m sure there are ways to clean that up but I m less sure about the time investment required to refine this.
             
-            // If we have a scene change the result is moe or less useless since the id for most ressource changed.
+            // If we have a scene change the result is more or less useless since the id for most ressource changed.
             // I should add an other mode that look for item whose id are present in all collections.
             IEnumerable<int> leakIDs = collections[leakEnd].instanceIDs.Keys.Except(collections[leakOrigin].instanceIDs.Keys);
 
@@ -469,29 +470,40 @@ namespace BeanCounter
                         GameObject go = (GameObject)o;
                         if (go.transform != null && go.transform.parent != null)
                         {
-                            sb.AppendFormat(" - GameObject parent name {0}", go.transform.parent.name);
+                            sb.AppendFormat(" - GameObject parent name \"{0}\"", go.transform.parent.name);
                         }
+                    }
+                    else if (o is MeshCollider)
+                    {
+                        MeshCollider m = (MeshCollider)o;
+                        sb.AppendFormat(" - convex {0} gameObject.name {1}  - GameObject parent name \"{2}\" ", m.convex, m.gameObject.name, m.gameObject.transform.parent != null ? m.gameObject.transform.parent.name : "N/A");
                     }
                     else if (o is Component)
                     {
                         Component c = (Component)o;
                         if (c.transform != null && c.transform.parent != null)
                         {
-                            sb.AppendFormat(" - Component parent name {0}", c.transform.parent.name);
+                            sb.AppendFormat(" - Component parent name \"{0}\"", c.transform.parent.name);
                         }
                     }
                     else if (o is Texture2D)
                     {
                         Texture2D t = (Texture2D)o;
-                        sb.AppendFormat(" - Texture2D {0} {1}x{2} {3} {4}", t.name, t.width.ToString(), t.height.ToString(), t.format.ToString(), t.GetPixels32().Sum(color32 => color32.a + color32.r + color32.b + color32.g).ToString());
+                        sb.AppendFormat(" - {0}x{1} \"{2}\" \"{3}\"", t.width.ToString(), t.height.ToString(), t.format.ToString(), t.GetPixels32().Sum(color32 => color32.a + color32.r + color32.b + color32.g).ToString());
                     }
                     else if (o is Material)
                     {
                         Material m = (Material)o;
-                        sb.AppendFormat(" - Material {0} Shader Name {1} Texture Name {2}", m.name, m.shader.name, m.mainTexture.name);
+                        sb.AppendFormat(" - Shader Name \"{0}\" Texture Name \"{1}\"", m.shader !=null ? m.shader.name : "N/A", m.mainTexture != null ? m.mainTexture.name : "N/A" );
+                    }
+                    else if (o is Mesh)
+                    {
+                        Mesh m = (Mesh)o;
+                        sb.AppendFormat(" - blendShapeCount {0} vertexCount {1}", m.blendShapeCount, m.vertexCount);
                     }
 
-                    sb.AppendFormat(" - id {0} \n", o.GetInstanceID().ToString());
+
+                    sb.AppendFormat(" - id {0} \n", ((uint)o.GetInstanceID()).ToString());
                 }
             }
             print(sb.ToString());
